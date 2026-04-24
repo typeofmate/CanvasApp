@@ -1,0 +1,5 @@
+# Secrets
+*.env
+
+# Node modules (если есть)
+node_modules/
