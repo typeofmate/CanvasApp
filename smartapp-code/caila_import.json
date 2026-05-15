@@ -1,0 +1,22 @@
+{
+  "project" : {
+    "id" : "nova_voice_canvas-9905763-WWD",
+    "name" : "nova_voice_canvas-9905763-WWD",
+    "folder" : "/jaicp"
+  },
+  "settings" : {
+    "language" : "ru",
+    "spellingCorrection" : false,
+    "classificationAlgorithm" : "sts",
+    "timezone" : "Europe/Moscow",
+    "extendedSettings" : {
+      "tokenizerEngine" : "default"
+    },
+    "shared" : false,
+    "businessShared" : false,
+    "business" : false
+  },
+  "intents" : [ ],
+  "entities" : [ ],
+  "enabledSystemEntities" : [ "duckling.number", "duckling.time", "duckling.duration", "duckling.phone-number", "duckling.email", "duckling.url" ]
+}
