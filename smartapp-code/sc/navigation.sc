@@ -6,12 +6,7 @@ theme: /
             [~главную|~главная]
 
         script:
-            $reactions.sendData({
-                action: {
-                    type: "navigate",
-                    page: "home",
-                },
-            });
+            navigateTo("home", $context);
             $reactions.answer("Открываю главную.");
 
     state: НавигацияЗадачи
@@ -20,12 +15,7 @@ theme: /
             [~задачи|~список задач]
 
         script:
-            $reactions.sendData({
-                action: {
-                    type: "navigate",
-                    page: "tasks",
-                },
-            });
+            navigateTo("tasks", $context);
             $reactions.answer("Открываю задачи.");
 
     state: НавигацияМузыка
@@ -34,12 +24,7 @@ theme: /
             [~музыку|~музыка]
 
         script:
-            $reactions.sendData({
-                action: {
-                    type: "navigate",
-                    page: "music",
-                },
-            });
+            navigateTo("music", $context);
             $reactions.answer("Открываю музыку.");
 
     state: НавигацияФокус
@@ -48,10 +33,5 @@ theme: /
             [~фокус|~таймер]
 
         script:
-            $reactions.sendData({
-                action: {
-                    type: "navigate",
-                    page: "focus",
-                },
-            });
+            navigateTo("focus", $context);
             $reactions.answer("Открываю фокус.");

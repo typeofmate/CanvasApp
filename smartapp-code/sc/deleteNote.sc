@@ -13,12 +13,7 @@ theme: /
                 return;
             }
 
-            $reactions.sendData({
-                action: {
-                    type: "delete_note",
-                    note: note,
-                },
-            });
+            deleteNote(note, $context);
 
             $reactions.answer("Удалил задачу: " + note);
             addSuggestions(["Открой задачи", "Добавь задачу оплатить интернет"], $context);

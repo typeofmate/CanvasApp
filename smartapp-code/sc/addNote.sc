@@ -13,12 +13,7 @@ theme: /
                 return;
             }
 
-            $reactions.sendData({
-                action: {
-                    type: "add_note",
-                    note: note,
-                },
-            });
+            addNote(note, $context);
 
             $reactions.answer("Добавил задачу: " + note);
             addSuggestions(["Открой задачи", "Выполнил купить молоко", "Удали задачу купить молоко"], $context);

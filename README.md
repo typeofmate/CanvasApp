@@ -34,8 +34,13 @@ cp .env.example .env
 
 ```env
 VITE_SALUTE_TOKEN=ваш_токен_из_SmartApp_Studio
-VITE_SALUTE_SMARTAPP=название_смартапа
+VITE_SALUTE_SMARTAPP=NovaVoiceCanvas
+VITE_SALUTE_INIT_PHRASE=Запусти Nova Voice Canvas
+VITE_SALUTE_SURFACE=SBERBOX
 ```
+
+`VITE_SALUTE_SMARTAPP` может быть внутренним именем проекта, а `VITE_SALUTE_INIT_PHRASE` должна совпадать с фразой запуска, зарегистрированной в SmartApp Studio.
+Если локальный отладчик отвечает, что навык не зарегистрирован, проверьте поверхность: для приложения СберБанк Онлайн используйте `SBOL`, для приложения Салют - `COMPANION`, для SberBox оставьте `SBERBOX`.
 
 4. Запустите проект:
 

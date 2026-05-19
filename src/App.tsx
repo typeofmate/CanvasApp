@@ -7,6 +7,7 @@ type PageId = "home" | "tasks" | "music" | "focus";
 type TodoFilter = "all" | "active" | "done";
 type Theme = "dark" | "light";
 type FocusPresetType = "work" | "break" | "custom";
+type AssistantSurface = "SBERBOX" | "STARGATE" | "SATELLITE" | "COMPANION" | "SBOL" | "TV" | "TV_HUAWEI" | "TIME";
 
 type Subtask = {
   id: number;
@@ -39,7 +40,15 @@ type AssistantCommand = {
     page?: string;
     query?: string;
     minutes?: number | string;
+    focus_mode?: string;
     subtask?: string;
+    task_number?: number | string;
+    subtask_number?: number | string;
+    title?: string;
+    todo?: string;
+    todo_id?: string | number;
+    subtask_id?: string | number;
+    theme?: string;
   };
   navigation?: {
     command?: "UP" | "DOWN" | "LEFT" | "RIGHT" | "FORWARD";
@@ -49,6 +58,8 @@ type AssistantCommand = {
     payload?: Record<string, unknown>;
   };
 };
+
+type AssistantAction = NonNullable<AssistantCommand["action"]>;
 
 const PAGES: Array<{ id: PageId; label: string; subtitle: string }> = [
   { id: "home", label: "Главная", subtitle: "Обзор" },
@@ -77,6 +88,16 @@ const pageMeta: Record<PageId, { title: string; description: string }> = {
 };
 
 const FAVORITE_QUERIES = ["Miyagi", "Imagine Dragons", "Rauf Faik", "The Weeknd"];
+const SUPPORTED_ASSISTANT_SURFACES = new Set<AssistantSurface>([
+  "SBERBOX",
+  "STARGATE",
+  "SATELLITE",
+  "COMPANION",
+  "SBOL",
+  "TV",
+  "TV_HUAWEI",
+  "TIME",
+]);
 
 const normalizeEnvValue = (value: string | undefined): string => {
   if (!value) {
@@ -109,7 +130,7 @@ const findEnvByPattern = (pattern: RegExp): string => {
   });
   return normalizeEnvValue(matchedEntry?.[1]);
 };
-console.log('ENV token:', import.meta.env.VITE_SALUTE_TOKEN);
+
 const getAssistantToken = (): string => {
   return (
     getEnv("VITE_SALUTE_TOKEN") ||
@@ -137,11 +158,119 @@ const getAssistantAppName = (): string => {
     return normalizeEnvValue(queryApp);   // больше не сохраняем в localStorage
   }
 
-  return "Canvas Voice Lab";   // fallback по умолчанию
+  return "Nova Voice Canvas";   // fallback по умолчанию
+};
+
+const splitSmartAppNameForSpeech = (name: string): string => {
+  return normalizeEnvValue(name)
+    .replace(/[_-]+/g, " ")
+    .replace(/([a-zа-яё])([A-ZА-ЯЁ])/g, "$1 $2")
+    .replace(/([A-ZА-ЯЁ]+)([A-ZА-ЯЁ][a-zа-яё]+)/g, "$1 $2")
+    .replace(/\s+/g, " ")
+    .trim();
+};
+
+const getAssistantInitPhrase = (smartAppName: string): string => {
+  const envInitPhrase =
+    getEnv("VITE_SALUTE_INIT_PHRASE") ||
+    getEnv("VITE_SMARTAPP_INIT_PHRASE") ||
+    getEnv("REACT_APP_SALUTE_INIT_PHRASE") ||
+    findEnvByPattern(/(VITE|REACT_APP).*(INIT|START).*(PHRASE|TEXT)|INIT.*SMARTAPP.*PHRASE/i);
+  if (envInitPhrase) {
+    return envInitPhrase;
+  }
+
+  const params = new URLSearchParams(window.location.search);
+  const queryInitPhrase = params.get("initPhrase") || params.get("saluteInitPhrase");
+  if (queryInitPhrase) {
+    return normalizeEnvValue(queryInitPhrase);
+  }
+
+  const spokenName = splitSmartAppNameForSpeech(smartAppName) || "Nova Voice Canvas";
+  if (/^(запусти|открой|включи|вруби|старт)\b/i.test(spokenName)) {
+    return spokenName;
+  }
+
+  return `Запусти ${spokenName}`;
+};
+
+const getAssistantSurface = (): AssistantSurface | undefined => {
+  const params = new URLSearchParams(window.location.search);
+  const rawSurface =
+    getEnv("VITE_SALUTE_SURFACE") ||
+    getEnv("VITE_SMARTAPP_SURFACE") ||
+    getEnv("REACT_APP_SALUTE_SURFACE") ||
+    params.get("surface") ||
+    params.get("saluteSurface") ||
+    "";
+  const normalizedSurface = normalizeEnvValue(rawSurface).toUpperCase() as AssistantSurface;
+  if (SUPPORTED_ASSISTANT_SURFACES.has(normalizedSurface)) {
+    return normalizedSurface;
+  }
+
+  return undefined;
 };
 
 const isPageId = (value: unknown): value is PageId => {
   return typeof value === "string" && PAGES.some((page) => page.id === value);
+};
+
+const isRecord = (value: unknown): value is Record<string, unknown> => {
+  return typeof value === "object" && value !== null;
+};
+
+const normalizeVoiceText = (value: string): string => {
+  return value.trim().toLowerCase().replace(/\s+/g, " ");
+};
+
+const matchesVoiceText = (candidate: string, query: string): boolean => {
+  const normalizedCandidate = normalizeVoiceText(candidate);
+  const normalizedQuery = normalizeVoiceText(query);
+  if (!normalizedCandidate || !normalizedQuery) {
+    return false;
+  }
+
+  return (
+    normalizedCandidate === normalizedQuery ||
+    normalizedCandidate.includes(normalizedQuery) ||
+    normalizedQuery.includes(normalizedCandidate)
+  );
+};
+
+const toAssistantAction = (value: unknown): AssistantAction | null => {
+  if (!isRecord(value) || typeof value.type !== "string") {
+    return null;
+  }
+
+  return value as AssistantAction;
+};
+
+const getCommandAction = (command: AssistantCommand): AssistantAction | null => {
+  const directAction = toAssistantAction(command.action);
+  if (directAction) {
+    return directAction;
+  }
+
+  const smartAppData = command.smart_app_data;
+  const smartAppAction = toAssistantAction(smartAppData);
+  if (smartAppAction) {
+    return smartAppAction;
+  }
+
+  const payload = smartAppData?.payload;
+  const payloadAction = toAssistantAction(payload);
+  if (payloadAction) {
+    return payloadAction;
+  }
+
+  if (isRecord(payload)) {
+    const nestedAction = toAssistantAction(payload.action);
+    if (nestedAction) {
+      return nestedAction;
+    }
+  }
+
+  return null;
 };
 
 const formatTime = (totalSeconds: number) => {
@@ -212,6 +341,8 @@ export default function App() {
   const assistantRef = useRef<any>(null);
   const assistantInitAttemptedRef = useRef(false);
   const pageRef = useRef<PageId>("home");
+  const tracksRef = useRef<Track[]>([]);
+  const focusDurationRef = useRef(focusDuration);
   const previewAudioRef = useRef<HTMLAudioElement | null>(null);
   const previewRafRef = useRef<number | null>(null);
   const isDark = theme === "dark";
@@ -266,17 +397,26 @@ export default function App() {
     };
   }, [page, todos.length, voiceItems]);
 
-  const sendFrontendAction = useCallback((actionId: string, parameters?: Record<string, unknown>) => {
-    if (!assistantRef.current?.sendData) {
-      return;
-    }
+  const sendFrontendAction = useCallback((actionType: string, parameters?: Record<string, unknown>) => {
+  if (!assistantRef.current?.sendData) {
+    console.warn('[DEBUG] sendData not available');
+    return;
+  }
 
+  console.log('[DEBUG] → sendData called:', {
+    action: { type: actionType, ...parameters }
+  });
+
+  try {
     assistantRef.current.sendData({
       action: {
-        action_id: actionId,
-        parameters,
+        type: actionType,
+        ...parameters,  // РАСКРЫВАЕМ параметры на верхний уровень
       },
     });
+  } catch (error) {
+    console.warn("[DEBUG] sendData failed", error);
+  }
   }, []);
 
   const navigateTo = useCallback((nextPage: PageId, pushHistory = true) => {
@@ -287,52 +427,62 @@ export default function App() {
   }, []);
 
   const addTodo = useCallback(
-    (title: string) => {
-      const cleanTitle = title.trim();
-      if (!cleanTitle) {
-        return false;
-      }
+  (title: string) => {
+    const cleanTitle = title.trim();
+    if (!cleanTitle) {
+      return false;
+    }
 
-      const nextTodo = createTodoItem(cleanTitle);
-      setTodos((prev) => [nextTodo, ...prev]);
-      sendFrontendAction("add_todo", { title: cleanTitle });
-      return true;
-    },
-    [sendFrontendAction]
+    const nextTodo = createTodoItem(cleanTitle);
+    setTodos((prev) => [nextTodo, ...prev]);
+    
+    // Используем add_note и ключ note
+    sendFrontendAction("add_note", { note: cleanTitle });
+    return true;
+  },
+  [sendFrontendAction]
   );
 
   const toggleTodo = useCallback(
-    (id: number) => {
-      setTodos((prev) => {
-        return prev.map((todo) => {
-          if (todo.id !== id) {
-            return todo;
-          }
-
-          const nextDone = !todo.done;
-          return {
-            ...todo,
-            done: nextDone,
-            subtasks: todo.subtasks.map((subtask) => ({ ...subtask, done: nextDone })),
-          };
-        });
+  (id: number) => {
+    const todo = todos.find(t => t.id === id);
+    if (!todo) return;
+    
+    setTodos((prev) => {
+      return prev.map((t) => {
+        if (t.id !== id) return t;
+        const nextDone = !t.done;
+        return {
+          ...t,
+          done: nextDone,
+          subtasks: t.subtasks.map((subtask) => ({ ...subtask, done: nextDone })),
+        };
       });
-      sendFrontendAction("toggle_todo", { id });
-    },
-    [sendFrontendAction]
+    });
+    
+    // Используем done_note с note или id
+    sendFrontendAction("done_note", { note: todo.title, id: String(id) });
+  },
+  [sendFrontendAction, todos] // Добавили todos в зависимости
   );
 
   const removeTodo = useCallback(
-    (id: number) => {
-      setTodos((prev) => prev.filter((todo) => todo.id !== id));
-      setSubtaskDrafts((prev) => {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      });
-      sendFrontendAction("remove_todo", { id });
-    },
-    [sendFrontendAction]
+  (id: number) => {
+    const todo = todos.find(t => t.id === id);
+    
+    setTodos((prev) => prev.filter((t) => t.id !== id));
+    setSubtaskDrafts((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    
+    // Используем delete_note
+    if (todo) {
+      sendFrontendAction("delete_note", { note: todo.title, id: String(id) });
+    }
+  },
+  [sendFrontendAction, todos] // Добавили todos в зависимости
   );
 
   const toggleTodoByAssistantId = useCallback((assistantId: string) => {
@@ -396,6 +546,208 @@ export default function App() {
     setTodos((prev) => prev.filter((todo) => todo.title.trim().toLowerCase() !== normalizedTitle));
   }, []);
 
+  const addSubtaskByAssistantTitle = useCallback((todoTitle: string | undefined, subtaskTitle: string) => {
+    const cleanSubtaskTitle = subtaskTitle.trim();
+    const cleanTodoTitle = todoTitle?.trim() ?? "";
+    if (!cleanSubtaskTitle) {
+      return;
+    }
+
+    setTodos((prev) => {
+      let added = false;
+      return prev.map((todo, index) => {
+        const isTarget = cleanTodoTitle ? matchesVoiceText(todo.title, cleanTodoTitle) : index === 0;
+        if (!isTarget || added) {
+          return todo;
+        }
+
+        added = true;
+        return {
+          ...todo,
+          done: false,
+          subtasks: [
+            ...todo.subtasks,
+            { id: Date.now() + Math.floor(Math.random() * 1000), title: cleanSubtaskTitle, done: false },
+          ],
+        };
+      });
+    });
+  }, []);
+
+  const addSubtaskByAssistantNumber = useCallback(
+    (taskNumber: number, subtaskTitle: string) => {
+      const cleanSubtaskTitle = subtaskTitle.trim();
+      if (!cleanSubtaskTitle) {
+        return;
+      }
+
+      const targetTaskIndex = Math.max(0, Math.round(taskNumber) - 1);
+      setTodos((prev) => {
+        const visibleTodos = prev.filter((todo) => {
+          if (todoFilter === "active") {
+            return !todo.done;
+          }
+          if (todoFilter === "done") {
+            return todo.done;
+          }
+          return true;
+        });
+        const targetTodo = visibleTodos[targetTaskIndex];
+        if (!targetTodo) {
+          return prev;
+        }
+
+        return prev.map((todo) => {
+          if (todo.id !== targetTodo.id) {
+            return todo;
+          }
+
+          return {
+            ...todo,
+            done: false,
+            subtasks: [
+              ...todo.subtasks,
+              { id: Date.now() + Math.floor(Math.random() * 1000), title: cleanSubtaskTitle, done: false },
+            ],
+          };
+        });
+      });
+    },
+    [todoFilter]
+  );
+
+  const toggleSubtaskByAssistantTitle = useCallback((todoTitle: string | undefined, subtaskTitle: string) => {
+    const cleanSubtaskTitle = subtaskTitle.trim();
+    const cleanTodoTitle = todoTitle?.trim() ?? "";
+    if (!cleanSubtaskTitle) {
+      return;
+    }
+
+    setTodos((prev) => {
+      let changedTodo = false;
+      return prev.map((todo) => {
+        const todoMatches = cleanTodoTitle ? matchesVoiceText(todo.title, cleanTodoTitle) : true;
+        if (!todoMatches || changedTodo) {
+          return todo;
+        }
+
+        let changedSubtask = false;
+        const nextSubtasks = todo.subtasks.map((subtask) => {
+          if (!changedSubtask && matchesVoiceText(subtask.title, cleanSubtaskTitle)) {
+            changedSubtask = true;
+            return { ...subtask, done: true };
+          }
+          return subtask;
+        });
+
+        if (!changedSubtask) {
+          return todo;
+        }
+
+        changedTodo = true;
+        return {
+          ...todo,
+          done: nextSubtasks.length > 0 && nextSubtasks.every((subtask) => subtask.done),
+          subtasks: nextSubtasks,
+        };
+      });
+    });
+  }, []);
+
+  const toggleSubtaskByAssistantNumber = useCallback((todoTitle: string | undefined, subtaskNumber: number) => {
+    const cleanTodoTitle = todoTitle?.trim() ?? "";
+    const targetIndex = Math.max(0, Math.round(subtaskNumber) - 1);
+
+    setTodos((prev) => {
+      let changedTodo = false;
+      return prev.map((todo) => {
+        const todoMatches = cleanTodoTitle ? matchesVoiceText(todo.title, cleanTodoTitle) : todo.subtasks.length > targetIndex;
+        if (!todoMatches || changedTodo || !todo.subtasks[targetIndex]) {
+          return todo;
+        }
+
+        const nextSubtasks = todo.subtasks.map((subtask, index) =>
+          index === targetIndex ? { ...subtask, done: true } : subtask
+        );
+
+        changedTodo = true;
+        return {
+          ...todo,
+          done: nextSubtasks.length > 0 && nextSubtasks.every((subtask) => subtask.done),
+          subtasks: nextSubtasks,
+        };
+      });
+    });
+  }, []);
+
+  const toggleSubtaskByAssistantPath = useCallback(
+    (taskNumber: number, subtaskNumber: number) => {
+      const targetTaskIndex = Math.max(0, Math.round(taskNumber) - 1);
+      const targetSubtaskIndex = Math.max(0, Math.round(subtaskNumber) - 1);
+
+      setTodos((prev) => {
+        const visibleTodos = prev.filter((todo) => {
+          if (todoFilter === "active") {
+            return !todo.done;
+          }
+          if (todoFilter === "done") {
+            return todo.done;
+          }
+          return true;
+        });
+        const targetTodo = visibleTodos[targetTaskIndex];
+        if (!targetTodo?.subtasks[targetSubtaskIndex]) {
+          return prev;
+        }
+
+        return prev.map((todo) => {
+          if (todo.id !== targetTodo.id) {
+            return todo;
+          }
+
+          const nextSubtasks = todo.subtasks.map((subtask, index) =>
+            index === targetSubtaskIndex ? { ...subtask, done: true } : subtask
+          );
+
+          return {
+            ...todo,
+            done: nextSubtasks.length > 0 && nextSubtasks.every((subtask) => subtask.done),
+            subtasks: nextSubtasks,
+          };
+        });
+      });
+    },
+    [todoFilter]
+  );
+
+  const removeSubtaskByAssistantTitle = useCallback((todoTitle: string | undefined, subtaskTitle: string) => {
+    const cleanSubtaskTitle = subtaskTitle.trim();
+    const cleanTodoTitle = todoTitle?.trim() ?? "";
+    if (!cleanSubtaskTitle) {
+      return;
+    }
+
+    setTodos((prev) =>
+      prev.map((todo) => {
+        const todoMatches = cleanTodoTitle ? matchesVoiceText(todo.title, cleanTodoTitle) : true;
+        if (!todoMatches) {
+          return todo;
+        }
+
+        const nextSubtasks = todo.subtasks.filter((subtask) => !matchesVoiceText(subtask.title, cleanSubtaskTitle));
+        if (nextSubtasks.length === todo.subtasks.length) {
+          return todo;
+        }
+
+        return {
+          ...todo,
+          done: nextSubtasks.length > 0 && nextSubtasks.every((subtask) => subtask.done),
+          subtasks: nextSubtasks,
+        };
+      })
+    );
+  }, []);
+
   const setSubtaskDraft = useCallback((todoId: number, value: string) => {
     setSubtaskDrafts((prev) => ({ ...prev, [todoId]: value }));
   }, []);
@@ -424,7 +776,7 @@ export default function App() {
         })
       );
       setSubtaskDraft(todoId, "");
-      sendFrontendAction("add_subtask", { todo_id: todoId, title: cleanTitle });
+      sendFrontendAction("add_subtask", { todo_id: String(todoId), title: cleanTitle });
     },
     [sendFrontendAction, setSubtaskDraft]
   );
@@ -449,7 +801,7 @@ export default function App() {
           };
         })
       );
-      sendFrontendAction("toggle_subtask", { todo_id: todoId, subtask_id: subtaskId });
+      sendFrontendAction("toggle_subtask", { todo_id: String(todoId), subtask_id: subtaskId });
     },
     [sendFrontendAction]
   );
@@ -472,7 +824,7 @@ export default function App() {
           };
         })
       );
-      sendFrontendAction("remove_subtask", { todo_id: todoId, subtask_id: subtaskId });
+      sendFrontendAction("remove_subtask", { todo_id: String(todoId), subtask_id: subtaskId });
     },
     [sendFrontendAction]
   );
@@ -493,12 +845,31 @@ export default function App() {
     sendFrontendAction("clear_completed_todos");
   }, [sendFrontendAction]);
 
+  const playTrackPreview = useCallback(
+    (track: Track, notifyBackend = true) => {
+      if (!track.previewUrl) {
+        return false;
+      }
+
+      setActivePreviewTrackId(track.trackId);
+      setActivePreviewUrl(track.previewUrl);
+      setPreviewCurrentTime(0);
+      setPreviewDuration(0);
+      setPreviewPlaying(false);
+      if (notifyBackend) {
+        sendFrontendAction("music_preview_open", { id: track.trackId, track: track.trackName });
+      }
+      return true;
+    },
+    [sendFrontendAction]
+  );
+
   const searchTracks = useCallback(
-    async (query: string) => {
+    async (query: string, options?: { autoplay?: boolean; notifyBackend?: boolean }) => {
       const cleanQuery = query.trim();
       if (!cleanQuery) {
         setTracks([]);
-        return;
+        return [];
       }
 
       setMusicLoading(true);
@@ -513,21 +884,31 @@ export default function App() {
         }
 
         const data = (await response.json()) as { results?: Track[] };
-        setTracks(data.results ?? []);
+        const results = data.results ?? [];
+        setTracks(results);
         setDetectedTrack(null);
-        setActivePreviewTrackId(null);
-        setActivePreviewUrl(null);
+        const firstPlayableTrack = results.find((track) => Boolean(track.previewUrl));
+        if (options?.autoplay && firstPlayableTrack) {
+          playTrackPreview(firstPlayableTrack, false);
+        } else {
+          setActivePreviewTrackId(null);
+          setActivePreviewUrl(null);
+        }
         setPreviewPlaying(false);
         setPreviewCurrentTime(0);
         setPreviewDuration(0);
-        sendFrontendAction("search_music", { query: cleanQuery });
+        if (options?.notifyBackend !== false) {
+          sendFrontendAction(options?.autoplay ? "music_play" : "music_search", { query: cleanQuery });
+        }
+        return results;
       } catch {
         setMusicError("Сервис музыки временно недоступен, попробуйте позже.");
+        return [];
       } finally {
         setMusicLoading(false);
       }
     },
-    [sendFrontendAction]
+    [playTrackPreview, sendFrontendAction]
   );
 
   const handleMusicSubmit = (event: FormEvent) => {
@@ -606,14 +987,9 @@ export default function App() {
         return;
       }
 
-      setActivePreviewTrackId(trackId);
-      setActivePreviewUrl(previewUrl);
-      setPreviewCurrentTime(0);
-      setPreviewDuration(0);
-      setPreviewPlaying(false);
-      sendFrontendAction("music_preview_open", { id: trackId });
+      playTrackPreview({ trackId, trackName: "preview", artistName: "", previewUrl });
     },
-    [activePreviewTrackId, sendFrontendAction]
+    [activePreviewTrackId, playTrackPreview]
   );
 
   const togglePlayback = useCallback(async () => {
@@ -636,6 +1012,47 @@ export default function App() {
     setPreviewPlaying(false);
   }, []);
 
+  const stopPreviewProgressLoop = useCallback(() => {
+    if (previewRafRef.current !== null) {
+      window.cancelAnimationFrame(previewRafRef.current);
+      previewRafRef.current = null;
+    }
+  }, []);
+
+  const playAvailablePreview = useCallback(async () => {
+    navigateTo("music");
+
+    const currentTracks = tracksRef.current;
+    const activeTrack = activePreviewTrackId ? currentTracks.find((track) => track.trackId === activePreviewTrackId) : null;
+    const playableTrack = activeTrack?.previewUrl ? activeTrack : currentTracks.find((track) => Boolean(track.previewUrl));
+    if (!playableTrack) {
+      setLastCommand("Backend: нет доступного превью трека");
+      return false;
+    }
+
+    playTrackPreview(playableTrack, false);
+
+    const audio = previewAudioRef.current;
+    if (audio && audio.paused) {
+      try {
+        await audio.play();
+      } catch {
+        // Source changes are also handled by the activePreviewUrl effect.
+      }
+    }
+
+    setLastCommand(`Backend: включили ${playableTrack.trackName}`);
+    return true;
+  }, [activePreviewTrackId, navigateTo, playTrackPreview]);
+
+  const pauseAvailablePreview = useCallback(() => {
+    const audio = previewAudioRef.current ?? document.querySelector<HTMLAudioElement>("audio");
+    audio?.pause();
+    setPreviewPlaying(false);
+    stopPreviewProgressLoop();
+    setLastCommand("Backend: музыка на паузе");
+  }, [stopPreviewProgressLoop]);
+
   const seekPreview = useCallback((value: number) => {
     const audio = previewAudioRef.current;
     if (!audio) {
@@ -651,13 +1068,6 @@ export default function App() {
       audio.volume = value;
     }
     setPreviewVolume(value);
-  }, []);
-
-  const stopPreviewProgressLoop = useCallback(() => {
-    if (previewRafRef.current !== null) {
-      window.cancelAnimationFrame(previewRafRef.current);
-      previewRafRef.current = null;
-    }
   }, []);
 
   const startPreviewProgressLoop = useCallback(() => {
@@ -700,8 +1110,18 @@ export default function App() {
   }, [page]);
 
   useEffect(() => {
+    tracksRef.current = tracks;
+  }, [tracks]);
+
+  useEffect(() => {
+    focusDurationRef.current = focusDuration;
+  }, [focusDuration]);
+
+  useEffect(() => {
     const token = getAssistantToken();
     const smartAppName = getAssistantAppName();
+    const initPhrase = getAssistantInitPhrase(smartAppName);
+    const assistantSurface = getAssistantSurface();
 
     if (assistantRef.current || assistantInitAttemptedRef.current) {
       return;
@@ -723,6 +1143,8 @@ export default function App() {
         tokenPresent: Boolean(token),
         tokenPreview: token ? `${token.slice(0, 10)}...${token.slice(-6)}` : "",
         smartAppName,
+        initPhrase,
+        assistantSurface: assistantSurface ?? "library default",
         envKeys: Object.keys(getEnvRecord()).filter((key) => key.includes("SALUTE") || key.includes("SMARTAPP")),
       };
 
@@ -732,6 +1154,8 @@ export default function App() {
         canUseDebugger,
         tokenPresent: Boolean(token),
         smartAppName,
+        initPhrase,
+        assistantSurface: assistantSurface ?? "library default",
       });
 
       if (isDev && !token && !hasAssistantHost) {
@@ -751,8 +1175,9 @@ export default function App() {
         canUseDebugger
           ? createSmartappDebugger({
               token,
-              // Keep init phrase deterministic and supported by scenario to avoid "Я не понимаю" on boot.
-              initPhrase: `Запусти ${smartAppName.replace(/_/g, ' ')}`,
+              // Keep init phrase deterministic and supported by scenario to avoid fallback on boot.
+              initPhrase,
+              surface: assistantSurface,
               getState: getAssistantState as any,
               nativePanel: {
                 defaultText: "Говорите!",
@@ -767,7 +1192,9 @@ export default function App() {
       assistantRef.current.on("start", () => setAssistantStatus("Подключен"));
 
       assistantRef.current.on("data", (command: AssistantCommand) => {
-        const action = command.action;
+        console.log('[DEBUG] ← Received command:', JSON.stringify(command, null, 2));
+
+        const action = getCommandAction(command);
         if (action?.type === "navigate" && isPageId(action.page)) {
           navigateTo(action.page as PageId);
           setLastCommand(`Backend: переход на ${action.page}`);
@@ -776,8 +1203,32 @@ export default function App() {
 
         if (action?.type === "music_search" && typeof action.query === "string") {
           setMusicQuery(action.query);
-          searchTracks(action.query);
+          searchTracks(action.query, { notifyBackend: false });
           setLastCommand(`Backend: поиск музыки ${action.query}`);
+          return;
+        }
+
+        if (action?.type === "music_play" && typeof action.query === "string") {
+          navigateTo("music");
+          setMusicQuery(action.query);
+          void searchTracks(action.query, { autoplay: true, notifyBackend: false }).then((results) => {
+            const playableTrack = results.find((track) => Boolean(track.previewUrl));
+            setLastCommand(
+              playableTrack
+                ? `Backend: включили ${playableTrack.trackName}`
+                : `Backend: не нашли превью для ${action.query}`
+            );
+          });
+          return;
+        }
+
+        if (action?.type === "music_play_current") {
+          void playAvailablePreview();
+          return;
+        }
+
+        if (action?.type === "music_pause") {
+          pauseAvailablePreview();
           return;
         }
 
@@ -788,21 +1239,54 @@ export default function App() {
               : typeof action.minutes === "string"
                 ? Number(action.minutes)
                 : NaN;
+          const focusMode: FocusPresetType =
+            action.focus_mode === "break" || action.focus_mode === "work" ? action.focus_mode : "custom";
           if (Number.isFinite(minutesValue) && minutesValue > 0) {
             const nextDuration = Math.round(minutesValue * 60);
             setFocusDuration(nextDuration);
             setFocusLeft(nextDuration);
-            setFocusPresetType("custom");
+            setFocusPresetType(focusMode);
+            setCustomMinutes(String(Math.round(minutesValue)));
           }
           setFocusRunning(true);
           navigateTo("focus");
-          setLastCommand("Backend: запустили фокус-таймер");
+          setLastCommand(focusMode === "break" ? "Backend: запустили таймер отдыха" : "Backend: запустили фокус-таймер");
           return;
         }
 
         if (action?.type === "focus_stop") {
           setFocusRunning(false);
           setLastCommand("Backend: остановили фокус-таймер");
+          return;
+        }
+
+        if (action?.type === "focus_pause") {
+          setFocusRunning(false);
+          navigateTo("focus");
+          setLastCommand("Backend: поставили таймер на паузу");
+          return;
+        }
+
+        if (action?.type === "focus_resume") {
+          setFocusRunning(true);
+          navigateTo("focus");
+          setLastCommand("Backend: продолжили таймер");
+          return;
+        }
+
+        if (action?.type === "focus_reset") {
+          setFocusRunning(false);
+          setFocusLeft(focusDurationRef.current);
+          navigateTo("focus");
+          setLastCommand("Backend: сбросили таймер");
+          return;
+        }
+
+        if (action?.type === "theme_set") {
+          if (action.theme === "dark" || action.theme === "light") {
+            setTheme(action.theme);
+            setLastCommand(action.theme === "dark" ? "Backend: темная тема" : "Backend: светлая тема");
+          }
           return;
         }
 
@@ -815,27 +1299,81 @@ export default function App() {
           return;
         }
 
-        if (action?.type === "done_note" && (typeof action.id === "string" || typeof action.id === "number")) {
-          toggleTodoByAssistantId(String(action.id));
+        if (action?.type === "done_note") {
+          if (typeof action.note === "string" && /подзадач|подпункт/i.test(action.note)) {
+            setLastCommand("Backend: команда про подзадачу не закрывает задачу");
+            return;
+          }
+          if (typeof action.id === "string" || typeof action.id === "number") {
+            toggleTodoByAssistantId(String(action.id));
+          } else if (typeof action.note === "string") {
+            toggleTodoByAssistantTitle(action.note);
+          }
           setLastCommand("Backend: отметили задачу как выполненную");
           return;
         }
 
-        if (action?.type === "done_note" && typeof action.note === "string") {
-          toggleTodoByAssistantTitle(action.note);
-          setLastCommand(`Backend: отметили задачу ${action.note}`);
-          return;
-        }
-
-        if (action?.type === "delete_note" && (typeof action.id === "string" || typeof action.id === "number")) {
-          removeTodoByAssistantId(String(action.id));
+        if (action?.type === "delete_note") {
+          if (typeof action.id === "string" || typeof action.id === "number") {
+            removeTodoByAssistantId(String(action.id));
+          } else if (typeof action.note === "string") {
+            removeTodoByAssistantTitle(action.note);
+          }
           setLastCommand("Backend: удалили задачу");
           return;
         }
 
-        if (action?.type === "delete_note" && typeof action.note === "string") {
-          removeTodoByAssistantTitle(action.note);
-          setLastCommand(`Backend: удалили задачу ${action.note}`);
+        if (action?.type === "add_subtask" && typeof action.subtask === "string") {
+          if (typeof action.task_number === "string" || typeof action.task_number === "number") {
+            const taskNumber = Number(action.task_number);
+            if (Number.isFinite(taskNumber) && taskNumber > 0) {
+              addSubtaskByAssistantNumber(taskNumber, action.subtask);
+              navigateTo("tasks");
+              setLastCommand(`Backend: добавили подзадачу ${action.subtask} к задаче ${taskNumber}`);
+              return;
+            }
+          }
+          const todoTitle = typeof action.note === "string" ? action.note : typeof action.todo === "string" ? action.todo : undefined;
+          addSubtaskByAssistantTitle(todoTitle, action.subtask);
+          navigateTo("tasks");
+          setLastCommand(`Backend: добавили подзадачу ${action.subtask}`);
+          return;
+        }
+
+        if (action?.type === "done_subtask" && typeof action.subtask === "string") {
+          const todoTitle = typeof action.note === "string" ? action.note : typeof action.todo === "string" ? action.todo : undefined;
+          toggleSubtaskByAssistantTitle(todoTitle, action.subtask);
+          navigateTo("tasks");
+          setLastCommand(`Backend: отметили подзадачу ${action.subtask}`);
+          return;
+        }
+
+        if (action?.type === "done_subtask" && (typeof action.subtask_number === "string" || typeof action.subtask_number === "number")) {
+          const subtaskNumber = Number(action.subtask_number);
+          const taskNumber =
+            typeof action.task_number === "string" || typeof action.task_number === "number"
+              ? Number(action.task_number)
+              : NaN;
+          const todoTitle = typeof action.note === "string" ? action.note : typeof action.todo === "string" ? action.todo : undefined;
+          if (Number.isFinite(taskNumber) && taskNumber > 0 && Number.isFinite(subtaskNumber) && subtaskNumber > 0) {
+            toggleSubtaskByAssistantPath(taskNumber, subtaskNumber);
+            navigateTo("tasks");
+            setLastCommand(`Backend: отметили ${taskNumber}.${subtaskNumber}`);
+            return;
+          }
+          if (Number.isFinite(subtaskNumber) && subtaskNumber > 0) {
+            toggleSubtaskByAssistantNumber(todoTitle, subtaskNumber);
+            navigateTo("tasks");
+            setLastCommand(`Backend: отметили подзадачу номер ${subtaskNumber}`);
+          }
+          return;
+        }
+
+        if (action?.type === "delete_subtask" && typeof action.subtask === "string") {
+          const todoTitle = typeof action.note === "string" ? action.note : typeof action.todo === "string" ? action.todo : undefined;
+          removeSubtaskByAssistantTitle(todoTitle, action.subtask);
+          navigateTo("tasks");
+          setLastCommand(`Backend: удалили подзадачу ${action.subtask}`);
           return;
         }
 
@@ -894,13 +1432,22 @@ export default function App() {
       setAssistantUiMode("none");
     }
   }, [
+    addSubtaskByAssistantNumber,
+    addSubtaskByAssistantTitle,
     addTodo,
+    focusDuration,
     getAssistantState,
     navigateTo,
+    pauseAvailablePreview,
+    playAvailablePreview,
     removeTodoByAssistantId,
     removeTodoByAssistantTitle,
+    removeSubtaskByAssistantTitle,
     runLocalCommand,
     searchTracks,
+    toggleSubtaskByAssistantNumber,
+    toggleSubtaskByAssistantPath,
+    toggleSubtaskByAssistantTitle,
     toggleTodoByAssistantId,
     toggleTodoByAssistantTitle,
   ]);
@@ -1570,12 +2117,11 @@ export default function App() {
       <>
         <div className="space-y-1">
           <h3 className="text-lg font-semibold">Интеграция музыки</h3>
-          <p className={cn("text-sm", isDark ? "text-emerald-50/70" : "text-slate-600")}>Как перейти к версии ближе к Shazam.</p>
+          <p className={cn("text-sm", isDark ? "text-emerald-50/70" : "text-slate-600")}>Дальнейшие планы развития</p>
         </div>
         <ul className={cn("mt-4 space-y-2 text-sm", isDark ? "text-emerald-50/85" : "text-slate-700")}>
-          <li>1. Захват фрагмента аудио с микрофона на клиенте.</li>
-          <li>2. Отправка в backend для аудио-фингерпринта.</li>
-          <li>3. Возврат найденного трека и запуск в плеере.</li>
+          <li>Полная интеграция Звук с возможностью распознавания треков</li>
+          <li>Ссылка на Звук для регистрации и прослушивания</li>
         </ul>
         <a
           className={cn("mt-4 inline-flex h-10 items-center px-4 text-sm", ghostButtonClass)}
@@ -1601,6 +2147,8 @@ export default function App() {
       </>
     ),
   };
+
+  const hasSidePanel = page !== "home";
 
   return (
     <div className={shellClass}>
@@ -1689,7 +2237,7 @@ export default function App() {
           </nav>
         </header>
 
-        <div className="grid gap-6 lg:grid-cols-[1fr_360px]">
+        <div className={cn("grid gap-6", hasSidePanel && "lg:grid-cols-[1fr_360px]")}>
           <section className={cn("rounded-3xl border p-6 backdrop-blur-xl", isDark ? "border-white/15 bg-black/25" : "border-emerald-700/20 bg-white/75")}>
             <div className="mb-5">
               <p className={cn("text-xs uppercase tracking-[0.2em]", isDark ? "text-emerald-100/65" : "text-emerald-800/70")}>{PAGES.find((item) => item.id === page)?.subtitle}</p>
@@ -1709,14 +2257,16 @@ export default function App() {
             </AnimatePresence>
           </section>
 
-          <section
-            className={cn(
-              "rounded-3xl border p-5 backdrop-blur-xl",
-              isDark ? "border-white/15 bg-gradient-to-b from-black/35 to-[#08170f]/75" : "border-emerald-700/20 bg-gradient-to-b from-white/85 to-[#edf8f2]/90"
-            )}
-          >
-            {sidePanel[page]}
-          </section>
+          {hasSidePanel ? (
+            <section
+              className={cn(
+                "rounded-3xl border p-5 backdrop-blur-xl",
+                isDark ? "border-white/15 bg-gradient-to-b from-black/35 to-[#08170f]/75" : "border-emerald-700/20 bg-gradient-to-b from-white/85 to-[#edf8f2]/90"
+              )}
+            >
+              {sidePanel[page]}
+            </section>
+          ) : null}
         </div>
       </div>
     </div>

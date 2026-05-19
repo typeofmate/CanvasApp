@@ -13,19 +13,33 @@ theme: /
                 return;
             }
 
-            $reactions.sendData({
-                action: {
-                    type: "navigate",
-                    page: "music",
-                },
-            });
+            navigateTo("music", $context);
+            if (/^(включи|поставь)/i.test(($context.request.query || ""))) {
+                playMusic(query, $context);
+                $reactions.answer("Включаю: " + query);
+            } else {
+                searchMusic(query, $context);
+                $reactions.answer("Ищу: " + query);
+            }
 
-            $reactions.sendData({
-                action: {
-                    type: "music_search",
-                    query: query,
-                },
-            });
+            addSuggestions(["Открой музыку", "Включи первый трек", "Найди трек The Weeknd"], $context);
 
-            $reactions.answer("Ищу: " + query);
-            addSuggestions(["Открой музыку", "Найди трек The Weeknd"], $context);
+    state: ПаузаМузыки
+        q!: (~пауза|~останови|~стоп|~выключи)
+            [~музыку|~трек|~песню]
+
+        script:
+            pauseMusic($context);
+            $reactions.answer("Поставил музыку на паузу.");
+            addSuggestions(["Включи первый трек", "Найди трек The Weeknd"], $context);
+
+    state: ПродолжениеМузыки
+        q!: (~включи|~запусти|~продолжи)
+            [~первый|~текущий|~найденный]
+            [~трек|~песню]
+
+        script:
+            navigateTo("music", $context);
+            playCurrentMusic($context);
+            $reactions.answer("Включаю трек.");
+            addSuggestions(["Пауза музыка", "Найди трек The Weeknd"], $context);
